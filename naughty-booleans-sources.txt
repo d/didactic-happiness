@@ -1,0 +1,3 @@
+src/backend/executor/nodeRowTrigger.c
+src/backend/utils/cache/lsyscache.c
+src/timezone/pgtz.c

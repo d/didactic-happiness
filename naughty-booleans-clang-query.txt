@@ -1,0 +1,13 @@
+// set output dump
+set bind-root false
+let notBool unless(hasType(asString('bool')))
+let notPointer unless(hasType(pointerType()))
+let bang unaryOperator(hasOperatorName("!"))
+let implicitAssignmentToBool binaryOperator(hasOperatorName('='), hasLHS(hasType(asString('bool'))), hasRHS(hasType(asString('char'))))
+let callBoolFunc callExpr(callee(functionDecl(returns(hasDeclaration(namedDecl(hasName('bool')))))))
+let callTzparse callExpr(callee(functionDecl(hasName('tzparse'))))
+let binaryComparison binaryOperator(anyOf(hasOperatorName('&&'), hasOperatorName('||')))
+let nonBoolExpr implicitCastExpr(hasSourceExpression(expr(notBool, notPointer)))
+// match implicitAssignmentToBool
+match ifStmt(hasCondition(expr(anyOf(allOf(bang, has(nonBoolExpr)), nonBoolExpr)).bind("using non-bool expression as condition")))
+// match expr(has(implicitCastExpr(hasSourceExpression(expr(callBoolFunc)))), unless(binaryComparison)).bind("implicit cast bool return value of function")

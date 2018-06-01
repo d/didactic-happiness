@@ -1,17 +1,20 @@
 // set output dump
-set bind-root false
+// set bind-root false
 let notBool unless(hasType(asString('bool')))
 let notPointer unless(hasType(anyOf(pointerType(), hasCanonicalType(pointerType()))))
 let isBang hasOperatorName("!")
-let implicitAssignmentToBool binaryOperator(hasOperatorName('='), hasLHS(hasType(asString('bool'))), hasRHS(hasType(asString('char'))))
+let isAssign anyOf(hasOperatorName('='), hasOperatorName('|='))
+let implicitAssignmentToBool binaryOperator(isAssign, hasLHS(hasType(asString('bool'))), hasRHS(unless(hasType(asString('bool')))))
 let callBoolFunc callExpr(callee(functionDecl(returns(hasDeclaration(namedDecl(hasName('bool')))))))
 let callTzparse callExpr(callee(functionDecl(hasName('tzparse'))))
-let binaryLogical binaryOperator(anyOf(hasOperatorName('&&'), hasOperatorName('||')))
-let logical anyOf(unaryOperator(isBang), binaryLogical)
+let logicalAndOr binaryOperator(anyOf(hasOperatorName('&&'), hasOperatorName('||')))
+let logical anyOf(unaryOperator(isBang), logicalAndOr)
 let comparison binaryOperator(anyOf(hasOperatorName('=='), hasOperatorName('!=')))
 let whitelist memberExpr(expr().bind("member"), member(hasName('es_instrument')))
-let nonBoolExpr allOf(implicitCastExpr(hasSourceExpression(expr(expr().bind("neither bool nor pointer"), notBool, notPointer, unless(whitelist)))), unless(logical), unless(comparison))
+let nonBoolExpr allOf(implicitCastExpr(hasSourceExpression(expr(expr().bind("neither bool nor pointer"), notBool, notPointer))), unless(logical), unless(comparison))
+let underImplicitCastToBool hasParent(implicitCastExpr(hasImplicitDestinationType(asString('bool'))))
+let castBackToBool conditionalOperator(anyOf(underImplicitCastToBool, expr(hasParent(parenExpr(underImplicitCastToBool)))))
 
 // match implicitAssignmentToBool
-match ifStmt(hasCondition(expr(expr().bind("using non-bool expression as condition"), anyOf(unaryOperator(isBang, hasUnaryOperand(nonBoolExpr)), nonBoolExpr, binaryOperator(binaryLogical, hasEitherOperand(nonBoolExpr))))))
-// match expr(has(implicitCastExpr(hasSourceExpression(expr(callBoolFunc)))), unless(binaryLogical)).bind("implicit cast bool return value of function")
+// match ifStmt(hasCondition(expr(expr().bind("using non-bool expression as condition"), anyOf(unaryOperator(isBang, hasUnaryOperand(nonBoolExpr)), nonBoolExpr, binaryOperator(logicalAndOr, hasEitherOperand(nonBoolExpr))))))
+match implicitCastExpr(expr().bind("implicit cast bool return value of function"), hasSourceExpression(expr(callBoolFunc)), hasParent(expr(expr().bind("parent"), unless(logicalAndOr), unless(castBackToBool))))

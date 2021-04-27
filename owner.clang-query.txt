@@ -1,0 +1,302 @@
+let releasingParam cxxMemberCallExpr(on(declRefExpr(to(parmVarDecl()))), callee(cxxMethodDecl(hasName("Release"))))
+let superfluousOwnParam expr(releasingParam, unless(hasAncestor(anyOf(ifStmt(), switchStmt()))))
+let releasingField cxxMemberCallExpr(on(ignoringImplicit(memberExpr(member(fieldDecl())))), callee(cxxMethodDecl(hasName("Release"))))
+let safeReleaseFieldInDtor callExpr(hasArgument(0, ignoringImplicit(memberExpr(member(fieldDecl())))), callee(cxxMethodDecl(hasName("SafeRelease"))), hasAncestor(cxxDestructorDecl()))
+let varInitializedToNew varDecl(hasInitializer(cxxNewExpr()))
+let returningNew returnStmt(hasReturnValue(ignoringImplicit(declRefExpr(to(varInitializedToNew)))))
+let varReleased varDecl(hasLocalStorage(), varDecl().bind("var"), hasAncestor(functionDecl(hasDescendant(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("var")))), callee(cxxMethodDecl(hasName("Release"))))))))
+let varSafeReleased varDecl(hasLocalStorage(), varDecl().bind("var"), hasAncestor(functionDecl(hasDescendant(callExpr(hasArgument(0, ignoringImplicit(declRefExpr(to(equalsBoundNode("var"))))), callee(cxxMethodDecl(hasName("SafeRelease"))))))))
+let callAddRefOnRetVar cxxMemberCallExpr(on(declRefExpr(to(varDecl(equalsBoundNode("retVar"))))), callee(cxxMethodDecl(hasName("AddRef"))))
+let callAddRefOnRetField cxxMemberCallExpr(on(ignoringImplicit(memberExpr(member(fieldDecl(equalsBoundNode("field")))))), callee(cxxMethodDecl(hasName("AddRef"))))
+let returningAddRefVar returnStmt(hasReturnValue(ignoringImplicit(declRefExpr(to(varDecl().bind("retVar"))))), forFunction(functionDecl(hasDescendant(callAddRefOnRetVar))))
+let returningAddRefParam returnStmt(hasReturnValue(ignoringImplicit(declRefExpr(to(parmVarDecl().bind("retVar"))))), forFunction(functionDecl(hasDescendant(callAddRefOnRetVar))))
+let returningParamRightAfterAddRef returnStmt(hasReturnValue(ignoringImplicit(declRefExpr(to(parmVarDecl().bind("retVar"))))), hasParent(compoundStmt(hasAnySubstatement(callAddRefOnRetVar))))
+let returningVarRightAfterAddRef returnStmt(hasReturnValue(ignoringImplicit(declRefExpr(to(varDecl(unless(parmVarDecl())).bind("retVar"))))), hasParent(compoundStmt(hasAnySubstatement(callAddRefOnRetVar))))
+let returningAddRefField returnStmt(hasReturnValue(ignoringImplicit(memberExpr(member(fieldDecl().bind("field"))))), hasAncestor(functionDecl(hasDescendant(callAddRefOnRetField))))
+let releaseOnRetVar cxxMemberCallExpr(on(declRefExpr(to(varDecl(equalsBoundNode("retVar"))))), callee(cxxMethodDecl(hasName("Release"))))
+let safeReleaseOnRetVar callExpr(hasArgument(0, ignoringImplicit(declRefExpr(to(equalsBoundNode("retVar"))))), callee(cxxMethodDecl(hasName("SafeRelease"))))
+let returningReleasedParm returnStmt(hasReturnValue(ignoringImplicit(declRefExpr(to(parmVarDecl().bind("retVar"))))), hasAncestor(functionDecl(hasDescendant(anyOf(releaseOnRetVar, safeReleaseOnRetVar)))))
+let returningVarInitFromVarReleased returnStmt(hasReturnValue(ignoringImplicit(declRefExpr(to(varDecl(hasInitializer(ignoringImplicit(declRefExpr(to(parmVarDecl()))))).bind("retVar"))))), hasAncestor(functionDecl(hasDescendant(releaseOnRetVar))))
+
+# match decl(varInitializedToNew, isExpansionInMainFile()) # 2288
+# match expr(releasingParam, isExpansionInMainFile()) # 40
+# match expr(superfluousOwnParam, isExpansionInMainFile())
+# match expr(releasingField, hasAncestor(cxxDestructorDecl()), isExpansionInMainFile()) # 486
+# match expr(safeReleaseFieldInDtor, isExpansionInMainFile()) # 324
+# match stmt(returningNew, isExpansionInMainFile()) # 452
+# match returningAddRefVar # 157
+# match returningAddRefParam # 39
+# match returningParamRightAfterAddRef # 38
+# match returningVarRightAfterAddRef # 84 (with dupes in headers)
+# match returningAddRefField # 
+# match returningReleasedParm # 0
+# match returnStmt(isExpansionInMainFile(), hasReturnValue(ignoringImplicit(declRefExpr(to(parmVarDecl()), hasType(pointerType())))))
+# match stmt(returningVarInitFromVarReleased, isExpansionInMainFile()) # 4
+# match decl(varReleased, isExpansionInMainFile()) # 1541
+# match decl(varSafeReleased, isExpansionInMainFile()) # 72
+
+# returning explicit cast new()
+# match returnStmt(hasReturnValue(ignoringParenImpCasts(castExpr(cxxNewExpr()).bind("cast")))) # 0
+
+let ownerDecl typeAliasTemplateDecl(hasName("::gpos::owner"))
+let ptrDecl typeAliasTemplateDecl(hasName("::gpos::pointer"))
+let castDecl typeAliasTemplateDecl(hasName("::gpos::cast_func"))
+let refCountBase cxxRecordDecl(hasMethod(hasName("Release")))
+let refCountRecordDecl cxxRecordDecl(isSameOrDerivedFrom(refCountBase))
+let refCountType qualType(hasDeclaration(refCountRecordDecl))
+let refCountPointerType pointsTo(hasCanonicalType(hasDeclaration(refCountRecordDecl)))
+let ownerType qualType(hasDeclaration(ownerDecl))
+let ptrType qualType(hasDeclaration(ptrDecl))
+let castType qualType(hasDeclaration(castDecl))
+let annotatedType qualType(hasDeclaration(anyOf(ptrDecl, ownerDecl)))
+let unannotatedType qualType(refCountPointerType, unless(hasDeclaration(typeAliasTemplateDecl(hasAnyName("::gpos::owner", "::gpos::pointer", "::gpos::cast_func", "::gpos::leaked")))))
+let annotated hasType(annotatedType)
+let unannotatedField fieldDecl(unless(isInstantiated()), unless(annotated),hasType(refCountPointerType))
+let unannotatedVar varDecl(unless(annotated), hasType(refCountPointerType))
+# match unannotatedField
+# match varDecl(unless(hasAncestor(anyOf(classTemplateDecl(),functionTemplateDecl()))), unless(parmVarDecl()), unannotatedVar)
+let refToPtrField memberExpr(member(fieldDecl(hasType(ptrDecl))), hasObjectExpression(cxxThisExpr()))
+let refToOwnerField memberExpr(member(fieldDecl(hasType(ownerDecl))), hasObjectExpression(cxxThisExpr()))
+# match callExpr(anyOf(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("Release"))), on(refToPtrField)), callExpr(callee(functionDecl(hasName("SafeRelease"))), hasArgument(0, refToPtrField))))
+# match binaryOperator(hasLHS(declRefExpr(to(varDecl()))), hasRHS(callExpr(callee(functionDecl(returns(hasDeclaration(ownerDecl)))))), unless(hasOperatorName("=")))
+# match varDecl(isExpansionInMainFile(), hasType(qualType(unannotatedType, pointsTo(isConstQualified()))))
+# match varDecl(hasInitializer(callExpr(callee(functionDecl(returns(unannotatedType))))), hasType(ptrDecl))
+
+# match returnStmt(hasReturnValue(ignoringParenImpCasts(memberExpr(member(fieldDecl(hasType(refCountPointerType)))))), isExpansionInMainFile())
+# match callExpr(anyOf(cxxMemberCallExpr(callee(cxxMethodDecl(hasName("Release"), parameterCountIs(0))), on(callExpr())), callExpr(callee(functionDecl(hasName("SafeRelease"))), hasArgument(0, callExpr()))))
+# match cxxMemberCallExpr(callee(cxxMethodDecl(hasName("AddRef"), parameterCountIs(0))), on(callExpr()))
+# match returnStmt(hasReturnValue(ignoringImplicit(memberExpr(member(fieldDecl(hasType(ptrDecl)).bind("field"))))), forFunction(functionDecl(unless(returns(hasDeclaration(ptrDecl))), hasDescendant(anyOf(binaryOperator(hasLHS(memberExpr(member(fieldDecl(equalsBoundNode("field"))))), hasOperatorName("=")), cxxMemberCallExpr(callee(cxxMethodDecl(hasName("AddRef"))), on(memberExpr(member(equalsBoundNode("field"))))))))))
+# match parmVarDecl(parmVarDecl().bind("param"), hasType(refCountPointerType), hasDeclContext(functionDecl(hasDescendant(binaryOperator(hasLHS(declRefExpr(to(equalsBoundNode("param")))), hasOperatorName("="))))))
+# match returnStmt(hasReturnValue(hasType(refCountPointerType)), forFunction(functionDecl(unless(returns(hasDeclaration(anyOf(ptrDecl, ownerDecl)))))))
+# match binaryOperator(hasLHS(declRefExpr(to(parmVarDecl()))), hasRHS(ignoringParenImpCasts(callExpr(callee(functionDecl(returns(hasDeclaration(ownerDecl))))))), hasOperatorName("="))
+# match returnStmt(hasReturnValue(ignoringImplicit(declRefExpr(to(varDecl().bind("retVar"))))), forFunction(functionDecl(hasDescendant(binaryOperator(hasOperatorName("="), hasLHS(declRefExpr(to(equalsBoundNode("retVar")))))))), hasParent(compoundStmt(hasAnySubstatement(callAddRefOnRetVar))))
+
+# match callExpr(forEachArgumentWithParamType(ignoringParenCasts(callExpr(callee(functionDecl(returns(hasDeclaration(ownerDecl)))))), unless(annotatedType)), unless(hasDeclaration(functionDecl(isTemplateInstantiation()))))
+# match callExpr(forEachArgumentWithParamType(ignoringParenCasts(cxxNewExpr()), qualType(unless(annotatedType), refCountPointerType)), unless(hasDeclaration(functionDecl(isTemplateInstantiation()))))
+# match cxxConstructExpr(forEachArgumentWithParamType(ignoringParenCasts(cxxNewExpr()), qualType(unless(annotatedType), refCountPointerType)), unless(hasDeclaration(cxxConstructorDecl(isTemplateInstantiation()))), isExpansionInMainFile()) # 888 in .cpp; 1448 including dupes in .h
+# match cxxConstructExpr(forEachArgumentWithParamType(ignoringParenCasts(callExpr(callee(functionDecl(returns(hasDeclaration(ownerDecl)))))), unless(annotatedType)), unless(hasDeclaration(functionDecl(isTemplateInstantiation()))))
+
+set bind-root false
+# tail call: passing a never-addref'd unannotated var to an owner param (should be moved owner var)
+# match returnStmt(forEachDescendant(callExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), unannotatedVar))))).bind("arg"), hasDeclaration(ownerDecl)))), forFunction(unless(hasDescendant(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("var")))), callee(cxxMethodDecl(hasName("AddRef"))))))))
+
+# tail call: passing unannotated var to pointer param (var is a pointer; unless it is passed to another non-pointer param)
+# match returnStmt(forEachDescendant(callExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), hasType(unless(annotatedType))))))).bind("arg"), hasDeclaration(ptrDecl)))), unless(hasDescendant(callExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(unless(equalsBoundNode("arg"))), ignoringParenCasts(declRefExpr(to(equalsBoundNode("var"))))), unless(hasDeclaration(ptrDecl))))))) # 307
+
+# tail call: passing a never-addref'd (and never-assigned) pointer var to an unannotated param (param is pointer)
+# match returnStmt(forEachDescendant(callExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), hasType(ptrDecl)))))).bind("arg"), unless(annotatedType)))), forFunction(functionDecl(unless(hasDescendant(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("var")))), callee(cxxMethodDecl(hasName("AddRef")))))), unless(hasDescendant(binaryOperator(hasLHS(declRefExpr(to(equalsBoundNode("var")))), hasOperatorName("="))))))) # 70 (with dupes in headers)
+
+# tail call: passing an owner var to an unannotated param (should be owner param, var is moved; unless var is also passed to another param)
+# match returnStmt(forEachDescendant(callExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), hasType(ownerDecl)))))).bind("arg"), qualType(unless(annotatedType), refCountPointerType)))), unless(hasDescendant(callExpr(hasAnyArgument(expr(ignoringParenCasts(unless(equalsBoundNode("arg"))), ignoringParenCasts(declRefExpr(to(equalsBoundNode("var"))))))))), unless(hasDescendant(cxxConstructExpr(hasAnyArgument(expr(ignoringParenCasts(unless(equalsBoundNode("arg"))), ignoringParenCasts(declRefExpr(to(equalsBoundNode("var")))))))))) # 39
+
+# tail call: passing an owner var to an unannotated param, same var passed to another param
+# match returnStmt(forEachDescendant(callExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), hasType(ownerDecl)))))).bind("arg"), qualType(unless(annotatedType), refCountPointerType)))), hasDescendant(callExpr(hasAnyArgument(expr(unless(ignoringParenCasts(equalsBoundNode("arg"))), ignoringParenCasts(declRefExpr(to(equalsBoundNode("var"))))).bind("dupe-arg"))))) # 0
+
+# tail call: passing an owner var, var initialized another var
+# match returnStmt(forEachDescendant(callExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), hasType(ownerDecl)))))).bind("arg"), qualType(refCountPointerType)))),forFunction(functionDecl(hasBody(hasDescendant(varDecl(hasInitializer(ignoringParenCasts(declRefExpr(to(equalsBoundNode("var"))))))))))) # 0
+
+# tail call: passing an owner var, var assigned to another var
+# match returnStmt(forEachDescendant(callExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), hasType(ownerDecl)))))).bind("arg"), qualType(refCountPointerType)))),forFunction(functionDecl(hasBody(hasDescendant(binaryOperator(hasOperatorName("="),hasRHS(ignoringParenCasts(declRefExpr(to(equalsBoundNode("var"))))))))))) # 0
+
+# tail call: passing a var to a param, same var passed to another param
+# match returnStmt(forEachDescendant(callExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage()))))).bind("arg"), refCountPointerType))), hasDescendant(callExpr(hasAnyArgument(expr(unless(ignoringParenCasts(equalsBoundNode("arg"))), ignoringParenCasts(declRefExpr(to(equalsBoundNode("var"))))).bind("dupe-arg"))))) # 0
+
+# tail call: passing an unannotated var to an annotated param in constructor (exploratory)
+# match returnStmt(forEachDescendant(cxxConstructExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), unannotatedVar))))).bind("arg"), hasDeclaration(ownerDecl))))) # 0
+
+# tail call: passing an annotated var to an unannotated param in constructor (exploratory)
+# match returnStmt(forEachDescendant(cxxConstructExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), annotated))))).bind("arg"), unless(annotatedType)))))
+
+# tail call: passing a never-addref'd unannotated var to an owner param in constructor (should be moved owner var)
+# match returnStmt(forEachDescendant(cxxConstructExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), unannotatedVar))))).bind("arg"), hasDeclaration(ownerDecl)))), forFunction(unless(hasDescendant(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("var")))), callee(cxxMethodDecl(hasName("AddRef")))))))) # 36 in .cpp; 295 including dupes in .h
+
+# tail call: passing unannotated var to pointer param in constructor (var is a pointer; unless it is passed to another non-pointer param)
+# match returnStmt(forEachDescendant(cxxConstructExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), hasType(unless(annotatedType))))))).bind("arg"), hasDeclaration(ptrDecl)))), unless(hasDescendant(callExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(unless(equalsBoundNode("arg"))), ignoringParenCasts(declRefExpr(to(equalsBoundNode("var"))))), unless(hasDeclaration(ptrDecl))))))) # ??
+
+# tail call: passing a never-addref'd (and never-assigned) pointer var to an unannotated param in constructor (param is pointer)
+# match returnStmt(forEachDescendant(cxxConstructExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), hasType(ptrDecl)))))).bind("arg"), unless(annotatedType)))), forFunction(functionDecl(unless(hasDescendant(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("var")))), callee(cxxMethodDecl(hasName("AddRef")))))), unless(hasDescendant(binaryOperator(hasLHS(declRefExpr(to(equalsBoundNode("var")))), hasOperatorName("="))))))) # 0
+
+# tail call: passing an owner var to an unannotated param in constructor (should be owner param, var is moved; unless var is also passed to another param)
+# match returnStmt(forEachDescendant(cxxConstructExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), hasType(ownerDecl)))))).bind("arg"), qualType(unless(annotatedType), refCountPointerType)))), unless(hasDescendant(callExpr(hasAnyArgument(expr(ignoringParenCasts(unless(equalsBoundNode("arg"))), ignoringParenCasts(declRefExpr(to(equalsBoundNode("var"))))))))), unless(hasDescendant(cxxConstructExpr(hasAnyArgument(expr(ignoringParenCasts(unless(equalsBoundNode("arg"))), ignoringParenCasts(declRefExpr(to(equalsBoundNode("var")))))))))) # 457
+
+# exploratory: annotated constructor parameters
+# match parmVarDecl(decl().bind("param"), hasType(annotatedType), hasDeclContext(cxxConstructorDecl()), isExpansionInMainFile()) # 8 in .cpp, 499 including dupes in .h
+
+# exploratory: pointer constructor parameters
+# match parmVarDecl(decl().bind("param"), hasType(ptrDecl), hasDeclContext(cxxConstructorDecl()), isExpansionInMainFile()) # 0
+
+# tail call: passing pointer var to owner param
+# match returnStmt(forEachDescendant(callExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), hasType(ptrDecl)))))).bind("arg"), hasDeclaration(ownerDecl))))) # 0
+
+# tail call: passing owner var to pointer param
+# match returnStmt(forEachDescendant(callExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), hasType(ownerDecl)))))).bind("arg"), hasDeclaration(ptrDecl))))) # 0
+
+# match returnStmt(forEachDescendant(cxxConstructExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage(), unannotatedVar))))).bind("arg"), hasDeclaration(ownerDecl)))), forFunction(unless(hasDescendant(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("var")))), callee(cxxMethodDecl(hasName("AddRef"))))))))
+# match returnStmt(hasReturnValue(hasDescendant(cxxConstructExpr(forEachArgumentWithParamType(expr(ignoringParenCasts(callExpr(callee(functionDecl(returns(qualType(refCountPointerType, unless(annotatedType)))).bind("f"))))).bind("arg"), hasDeclaration(ownerDecl))))))
+# match callExpr(hasArgument(0, expr(ignoringParenCasts(declRefExpr(to(varDecl(varDecl().bind("var"), hasLocalStorage()))))).bind("arg")), callee(cxxMethodDecl(hasName("Append"), ofClass(classTemplateSpecializationDecl(hasName("CDynamicPtrArray"))))), forFunction(unless(hasDescendant(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("var")))), callee(cxxMethodDecl(hasName("AddRef"))))))))
+# match returnStmt(hasReturnValue(ignoringImplicit(declRefExpr(to(varDecl(hasLocalStorage(), unless(annotated)).bind("var"))))), forFunction(functionDecl(unless(hasDescendant(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("var")))), callee(cxxMethodDecl(hasName("AddRef")))))), returns(hasDeclaration(ownerDecl)))))
+
+# match varDecl(hasType(refCountPointerType), hasParent(declStmt(unless(declCountIs(1)))))
+# match varDecl(hasType(pointsTo(refCountPointerType)), unless(isInstantiated()))
+
+# assign var to an owner field
+# match binaryOperator(expr().bind("expr"), hasLHS(memberExpr(member(fieldDecl(hasType(ownerDecl))), hasObjectExpression(cxxThisExpr()))), hasOperatorName("="), hasRHS(ignoringParenCasts(declRefExpr(to(varDecl(hasLocalStorage())))))) # 882, always a local var / param
+
+
+# assign var to owner field, var addref'd in func
+# match binaryOperator(expr().bind("expr"), hasLHS(memberExpr(member(fieldDecl(hasType(ownerDecl))), hasObjectExpression(cxxThisExpr()))), hasOperatorName("="), hasRHS(ignoringParenCasts(declRefExpr(to(parmVarDecl(hasLocalStorage(), decl().bind("v"), hasDeclContext(functionDecl(hasBody(stmt(hasDescendant(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("v")))), callee(cxxMethodDecl(hasName("AddRef"))))))))))))))) # 34
+
+# assign param to an owner field
+# match binaryOperator(expr().bind("expr"), hasLHS(memberExpr(member(fieldDecl(hasType(ownerDecl))), hasObjectExpression(cxxThisExpr()))), hasOperatorName("="), hasRHS(ignoringParenCasts(declRefExpr(to(parmVarDecl(unless(annotated), decl().bind("v"), hasDeclContext(functionDecl(hasBody(stmt(hasDescendant(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("v")))), callee(cxxMethodDecl(hasName("AddRef"))))))))))))))) # 855; 852 with unannotated param
+
+# an unannotated var that is never passed as an argument to a function or a constructor
+# match varDecl(hasLocalStorage(), hasType(qualType(refCountPointerType, unless(annotatedType))), decl().bind("v"), hasDeclContext(functionDecl(unless(hasName("SafeRelease")), hasBody(stmt(unless(hasDescendant(anyOf(callExpr(hasAnyArgument(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v")))))), cxxConstructExpr(hasAnyArgument(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v")))))), binaryOperator(hasRHS(anyOf(declRefExpr(to(equalsBoundNode("v"))), hasDescendant(declRefExpr(to(equalsBoundNode("v")))))), hasOperatorName("=")))))))))) # 48,039
+
+# 2063 unnamed unnannotated params; 172 for non-virtual functions. should be pointers
+# match parmVarDecl(hasName("(anonymous)"), hasType(refCountPointerType), unless(annotated), decl().bind("v"), hasDeclContext(functionDecl(unless(isInstantiated()), hasBody(stmt())))) # 2747 on HEAD
+# match parmVarDecl(hasName("(anonymous)"), hasType(ownerType), decl().bind("v"), hasDeclContext(functionDecl(unless(isInstantiated()), hasBody(stmt())))) # two counter examples (partial scan dead virtual functions)
+
+# match callExpr(forEachArgumentWithParamType(callExpr(callee(functionDecl(unless(hasName("std::move")), returns(unless(annotatedType))))).bind("arg"), ownerType))
+
+# array of structs holding member function pointers
+# match varDecl(decl().bind("v"), hasInitializer(initListExpr(has(initListExpr(has(unaryOperator(hasOperatorName("&"), hasType(memberPointerType(pointee(functionProtoType())))))))))) # 4
+
+# array of structs holding function pointers
+# match varDecl(decl().bind("v"), hasInitializer(initListExpr(has(initListExpr(has(unaryOperator(hasOperatorName("&"), hasType(pointerType(pointee(functionProtoType())))))))))) # 2
+
+# function pointer / member function pointer vars
+# match varDecl(decl().bind("v"), unless(isInstantiated()), unless(isExpansionInSystemHeader()), hasType(hasCanonicalType(anyOf(qualType(pointerType(pointee(functionProtoType()))), qualType(memberPointerType(pointee(functionProtoType())))))))
+
+# assign to fp var
+# match binaryOperator(hasRHS(ignoringParenCasts(unaryOperator(hasOperatorName("&"), hasUnaryOperand(declRefExpr(to(functionDecl())))))), hasOperatorName("=")) # 0
+# match varDecl(decl().bind("v"), unless(isExpansionInSystemHeader()), hasInitializer(ignoringParenCasts(unaryOperator(hasOperatorName("&"), hasUnaryOperand(declRefExpr(to(functionDecl()))))))) # 0
+# match varDecl(decl().bind("v"), unless(isExpansionInSystemHeader()), unless(isInstantiated()), hasInitializer(hasDescendant(expr(ignoringParenCasts(unaryOperator(hasOperatorName("&"), hasUnaryOperand(declRefExpr(to(functionDecl())))).bind("ampersand")))))) # 6: 4 member function, 2 functions: token_parse_handler_map and translators_mapping
+
+# tail call through pf or pmf
+# enable output dump
+# match returnStmt(hasReturnValue(ignoringParenCasts(callExpr(unless(isExpansionInSystemHeader()), unless(isExpansionInFileMatching("include/xercesc")), callee(expr(ignoringParenImpCasts(expr(unless(anyOf(declRefExpr(to(anyOf(parmVarDecl(), nonTypeTemplateParmDecl()))), memberExpr(member(fieldDecl()))))).bind("callee")))), callee(valueDecl(hasType(hasCanonicalType(anyOf(qualType(memberPointerType()), qualType(pointerType())))))))))) # 7
+
+# tail call through pmf
+# match returnStmt(hasReturnValue(ignoringParenCasts(callExpr(callee(varDecl(hasType(typedefNameDecl(typedefNameDecl().bind("td"), hasType(hasCanonicalType(memberPointerType())))))))))).bind("call") # 3
+
+# a local var/param that is never assigned, addref'd or passed to any function calls. must be a pointer
+# match varDecl(hasLocalStorage(), hasType(refCountPointerType), unless(annotated), decl().bind("v"), hasDeclContext(functionDecl(unless(isInstantiated()), hasBody(stmt(unless(hasDescendant(anyOf(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("v")))), callee(cxxMethodDecl(hasAnyName("Release")))), callExpr(forEachArgumentWithParamType(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v")))), unless(ptrType))), cxxConstructExpr(forEachArgumentWithParamType(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v")))), unless(ptrType))), parenListExpr(has(expr(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v"))))))), binaryOperator(hasEitherOperand(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v"))))), hasOperatorName("=")), returnStmt(hasReturnValue(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v")))))), declStmt(has(varDecl(hasInitializer(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v"))))))))))))), unless(cxxConstructorDecl(hasAnyConstructorInitializer(withInitializer(expr(anyOf(declRefExpr(to(equalsBoundNode("v"))), hasDescendant(declRefExpr(to(equalsBoundNode("v"))))))))))))) # 26,594; only 24,801 unannotated
+# match varDecl(hasLocalStorage(), hasType(refCountPointerType), decl().bind("v"), hasDeclContext(functionDecl(hasBody(stmt(unless(hasDescendant(anyOf(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("v")))), callee(cxxMethodDecl(hasAnyName("Release")))), callExpr(hasAnyArgument(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v")))))), cxxConstructExpr(hasAnyArgument(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v")))))), cxxNewExpr(has(parenListExpr(has(expr(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v"))))))))), binaryOperator(hasEitherOperand(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v"))))), hasOperatorName("=")), returnStmt(hasReturnValue(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v")))))), declStmt(has(varDecl(hasInitializer(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v"))))))))))), hasDescendant(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("v")))), callee(cxxMethodDecl(hasAnyName("AddRef"))))))), unless(cxxConstructorDecl(hasAnyConstructorInitializer(withInitializer(expr(anyOf(declRefExpr(to(equalsBoundNode("v"))), hasDescendant(declRefExpr(to(equalsBoundNode("v"))))))))))))) # 391; 391 unannotated
+
+# weird?
+# match varDecl(hasLocalStorage(), hasType(refCountPointerType), hasType(ownerType), decl().bind("v"), hasDeclContext(functionDecl(hasBody(stmt(unless(hasDescendant(anyOf(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("v")))), callee(cxxMethodDecl(hasAnyName("AddRef", "Release")))), callExpr(hasAnyArgument(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v")))))), cxxConstructExpr(hasAnyArgument(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v")))))), cxxNewExpr(has(parenListExpr(has(expr(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v"))))))))), binaryOperator(hasEitherOperand(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v"))))), hasOperatorName("=")), returnStmt(hasReturnValue(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v")))))), declStmt(has(varDecl(hasInitializer(ignoringParenCasts(declRefExpr(to(equalsBoundNode("v"))))))))))))), unless(cxxConstructorDecl(hasAnyConstructorInitializer(withInitializer(expr(anyOf(declRefExpr(to(equalsBoundNode("v"))), hasDescendant(declRefExpr(to(equalsBoundNode("v"))))))))))))) # 0
+
+# Improper use of reinterpret_cast
+# match cxxReinterpretCastExpr(hasSourceExpression(ignoringParenImpCasts(declRefExpr(to(parmVarDecl(hasType(pointsTo(cxxRecordDecl().bind("base")))))))),hasDestinationType(pointsTo(cxxRecordDecl(isDerivedFrom(equalsBoundNode("base")))))).bind("cast")
+# match cStyleCastExpr(hasSourceExpression(ignoringParenImpCasts(declRefExpr(hasType(pointsTo(cxxRecordDecl().bind("base")))))),hasDestinationType(pointsTo(cxxRecordDecl(isDerivedFrom(equalsBoundNode("base")))))).bind("cast")
+
+# Special case: boolean functions take pointers:
+# match parmVarDecl(unless(isInstantiated()),hasType(unannotatedType),hasDeclContext(functionDecl(returns(booleanType()),isDefinition()))).bind("pointer")
+# Cast functions
+# match returnStmt(hasDescendant(callExpr(hasType(castDecl), hasArgument(0, declRefExpr(unless(hasType(ptrDecl))))).bind("cast"))).bind("r")
+# match functionDecl(returns(hasDeclaration(castDecl)),hasBody(stmt())).bind("cast")
+
+# multi decl
+# match declStmt(containsDeclaration(0, varDecl(hasType(refCountPointerType))),unless(declCountIs(1))).bind("multi-decl")
+
+# star-star params
+# match parmVarDecl(unless(isInstantiated()),hasType(pointsTo(unannotatedType)), hasDeclContext(functionDecl(hasBody(stmt())))).bind("param") # 195 in gporca, 4 in gpopt; (40 after annotating owners)
+# match binaryOperator(hasOperatorName("="),hasLHS(unaryOperator(hasOperatorName("*"),hasUnaryOperand(ignoringParenImpCasts(declRefExpr(to(parmVarDecl(hasType(pointsTo(refCountPointerType))))))))),hasRHS(hasType(ptrDecl))).bind("assign")
+# match functionDecl(unless(isInstantiated()),hasBody(stmt()),hasAnyParameter(parmVarDecl(hasType(pointsTo(unannotatedType))).bind("one param"))) # 117 in gporca, 2 in gpopt
+# match cxxMemberCallExpr(on(unaryOperator(hasOperatorName("*"),hasUnaryOperand(ignoringParenImpCasts(declRefExpr(to(parmVarDecl(hasType(pointsTo(refCountPointerType))))))))),callee(cxxMethodDecl(hasName("Release")))).bind("release") # 44 in orca, 0 in gpopt
+# match cxxMemberCallExpr(on(unaryOperator(hasOperatorName("*"),hasUnaryOperand(ignoringParenImpCasts(declRefExpr(to(parmVarDecl(hasType(pointsTo(refCountPointerType))))))))),callee(cxxMethodDecl(hasName("AddRef")))).bind("add_ref") # 1
+# match callExpr(hasArgument(0,unaryOperator(hasOperatorName("*"),hasUnaryOperand(ignoringParenImpCasts(declRefExpr(to(parmVarDecl(hasType(pointsTo(refCountPointerType))))))))),callee(cxxMethodDecl(hasName("SafeRelease")))).bind("release") # 3 in orca, 0 in gpopt
+# match cxxMethodDecl(isVirtual(),unless(isInstantiated()),hasBody(stmt()),hasAnyParameter(hasType(pointsTo(unannotatedType)))).bind("func_w_star_star_param") # 0
+# match callExpr(unless(callee(decl(isInstantiated()))),forEachArgumentWithParamType(unless(unaryOperator(hasOperatorName("&"),hasUnaryOperand(declRefExpr()))), pointsTo(refCountPointerType))).bind("call") # 84
+# match callExpr(unless(callee(decl(isInstantiated()))),forEachArgumentWithParamType(unaryOperator(hasOperatorName("&"),hasUnaryOperand(declRefExpr())), pointsTo(refCountPointerType))).bind("call") # 455 in gporca, 3 in gpopt
+
+# output params (star-ref)
+# match parmVarDecl(unless(isInstantiated()),hasType(references(qualType(unless(isConstQualified()),unannotatedType))), hasDeclContext(functionDecl(hasBody(stmt())))).bind("param") # 195 in gporca, 4 in gpopt; (40 after annotating owners)
+
+# star-star non-output params
+# match parmVarDecl(unless(isInstantiated()),hasType(pointsTo(refCountPointerType)),decl().bind("out_param"),hasDeclContext(functionDecl(hasBody(unless(hasDescendant(stmt(anyOf(binaryOperator(hasLHS(ignoringParenImpCasts(unaryOperator(hasOperatorName("*"),hasUnaryOperand(ignoringParenImpCasts(declRefExpr(to(equalsBoundNode("out_param")))))))),hasOperatorName("=")),callExpr(hasAnyArgument(ignoringParenImpCasts(declRefExpr(to(equalsBoundNode("out_param"))))))))))))))
+
+# ctor param initializing owner field
+# match parmVarDecl(unless(isInstantiated()),hasType(unannotatedType),decl().bind("param"),hasDeclContext(cxxConstructorDecl(hasAnyConstructorInitializer(cxxCtorInitializer(forField(hasType(ownerDecl)),withInitializer(ignoringParenImpCasts(declRefExpr(to(parmVarDecl(equalsBoundNode("param")))))))))))
+# match parmVarDecl(unless(isInstantiated()),hasType(unannotatedType),decl().bind("param"),hasDeclContext(cxxConstructorDecl(hasAnyConstructorInitializer(cxxCtorInitializer(forField(hasType(ownerDecl)),withInitializer(ignoringParenImpCasts(declRefExpr(to(parmVarDecl(equalsBoundNode("param")))))))),hasBody(hasDescendant(cxxMemberCallExpr(on(declRefExpr(to(equalsBoundNode("param")))), callee(cxxMethodDecl(hasAnyName("AddRef"))))))))) # 2
+# match parmVarDecl(unless(isInstantiated()),hasType(unannotatedType),decl().bind("param"),hasDeclContext(cxxConstructorDecl(hasAnyConstructorInitializer(cxxCtorInitializer(forField(fieldDecl(hasType(ownerDecl)).bind("field")),withInitializer(ignoringParenImpCasts(declRefExpr(to(parmVarDecl(equalsBoundNode("param")))))))),hasBody(hasDescendant(cxxMemberCallExpr(on(memberExpr(member(equalsBoundNode("field")))), callee(cxxMethodDecl(hasAnyName("AddRef")))))))))
+
+# ctor param initializing pointer field
+# match parmVarDecl(unless(isInstantiated()),hasType(unannotatedType),decl().bind("param"),hasDeclContext(cxxConstructorDecl(hasAnyConstructorInitializer(cxxCtorInitializer(forField(hasType(ptrDecl)),withInitializer(ignoringParenImpCasts(declRefExpr(to(parmVarDecl(equalsBoundNode("param")))))))))))
+
+# match cxxMemberCallExpr(callee(cxxMethodDecl(hasName("Replace"),ofClass(classTemplateSpecializationDecl(hasName("::gpos::CDynamicPtrArray"),hasTemplateArgument(1, refersToDeclaration(functionDecl(hasName("CleanupRelease")))))))), hasArgument(1,ignoringImplicit(declRefExpr(to(varDecl(unannotatedVar))).bind("arg")))) # 1
+
+# match cxxMemberCallExpr(callee(cxxMethodDecl(hasName("Replace"),ofClass(classTemplateSpecializationDecl(hasName("::gpos::CDynamicPtrArray"),hasTemplateArgument(1, templateArgument(refersToDeclaration(functionDecl(unless(hasName("CleanupRelease"))))))))))).bind("call")
+# match cxxMemberCallExpr(callee(cxxMethodDecl(hasName("Insert"),ofClass(classTemplateSpecializationDecl(hasName("::gpos::CHashMap"),hasTemplateArgument(5, refersToDeclaration(functionDecl(hasName("CleanupRelease")))))))), hasArgument(1,ignoringImplicit(declRefExpr(to(varDecl(unannotatedVar))).bind("arg"))))
+
+# square subscript / bracket operator
+# match returnStmt(hasReturnValue(ignoringParenImpCasts(cxxOperatorCallExpr(hasType(refCountPointerType),callee(cxxMethodDecl(hasOverloadedOperatorName("[]"),ofClass(hasName("::gpos::CDynamicPtrArray")))),hasArgument(0,ignoringParenCasts(unaryOperator(hasOperatorName("*"),hasUnaryOperand(ignoringParenCasts(memberExpr(member(fieldDecl()))))))))))).bind("r") # 577 in gporca, 55 in gpopt
+# match returnStmt(hasReturnValue(ignoringParenImpCasts(cxxMemberCallExpr(hasType(refCountPointerType),callee(cxxMethodDecl(ofClass(hasName("::gpos::CHashMap")), hasName("Find"))),on(memberExpr(member(fieldDecl()))))))).bind("r")
+# match cxxMemberCallExpr(on(cxxOperatorCallExpr(callee(cxxMethodDecl(hasOverloadedOperatorName("[]"),ofClass(hasName("::gpos::CDynamicPtrArray")))))),callee(cxxMethodDecl(hasName("AddRef")))).bind("addref-on-bracket") # 10 in gporca, 0 in gpopt
+# match cxxMemberCallExpr(on(cxxOperatorCallExpr(callee(cxxMethodDecl(hasOverloadedOperatorName("[]"),ofClass(hasName("::gpos::CDynamicPtrArray")))),hasArgument(0, ignoringParenImpCasts(unaryOperator(hasOperatorName("*"),hasUnaryOperand(ignoringParenImpCasts(memberExpr(hasObjectExpression(cxxThisExpr()))))))))),callee(cxxMethodDecl(hasName("AddRef")))).bind("addref-on-bracket-on-field") # 1 in gporca, 0 in gpopt
+
+# match returnStmt(hasReturnValue(ignoringParenImpCasts(cxxMemberCallExpr(hasType(refCountPointerType),argumentCountIs(0),on(memberExpr(hasObjectExpression(cxxThisExpr()))))))).bind("getter")
+# match cxxMemberCallExpr(on(cxxMemberCallExpr(hasType(refCountPointerType),argumentCountIs(0),on(memberExpr(hasObjectExpression(cxxThisExpr()))))),callee(cxxMethodDecl(hasName("AddRef")))).bind("field-getter-addref")
+# match typedefNameDecl(hasType(ignoringParens(anyOf(qualType(memberPointerType()), qualType(pointerType(pointee(functionProtoType()))), qualType(functionProtoType())))),unless(anyOf(isExpansionInSystemHeader(),isExpansionInFileMatching("xercesc/.*")))).bind("typedef")
+
+# assigning an owner value to a pointer (need to convert to .get())
+# match varDecl(hasType(ptrDecl), hasInitializer(ignoringParenImpCasts(hasType(ownerDecl)))).bind("init")
+
+# match functionDecl(returns(castType), hasParameter(0, hasType(isConstQualified()))).bind("cast_func")
+# match typedefNameDecl(hasType(hasDeclaration(classTemplateSpecializationDecl(hasName("CDynamicPtrArray"), hasTemplateArgument(0, refersToType(refCountType)), hasTemplateArgument(1, refersToDeclaration(functionDecl(hasName("CleanupRelease")))))))).bind("typedef")
+
+# hash map that don't own the values
+# match typedefNameDecl(hasType(hasDeclaration(classTemplateSpecializationDecl(hasName("CHashMap"), hasTemplateArgument(4, refersToDeclaration(functionDecl(hasAnyName("CleanupNULL", "CleanupRelease")))), hasTemplateArgument(5, refersToDeclaration(functionDecl(hasAnyName("CleanupNULL", "CleanupRelease")))))))).bind("typedef")
+
+# match typedefNameDecl(hasType(hasDeclaration(classTemplateSpecializationDecl(hasName("CHashMap"), hasTemplateArgument(2, refersToDeclaration(functionDecl(hasName("gpos::HashPtr")))), hasTemplateArgument(4, refersToDeclaration(functionDecl(hasName("CleanupRelease")))))))).bind("typedef") # 1
+# RefKDeleteT
+# match typedefNameDecl(hasType(hasDeclaration(classTemplateSpecializationDecl(hasName("CHashMap"), hasTemplateArgument(4, refersToDeclaration(functionDecl(hasName("CleanupRelease")))), hasTemplateArgument(5, refersToDeclaration(functionDecl(hasName("gpos::CleanupDelete")))))))).bind("typedef") #
+
+# HashSet typedef
+# match typedefNameDecl(hasType(hasDeclaration(classTemplateSpecializationDecl(hasName("CHashSet"), hasTemplateArgument(3, refersToDeclaration(functionDecl(hasName("CleanupRelease")))))))).bind("typedef") # 31 in gpopt, 1347 in gporca
+
+# functions with unannotated return type
+# match functionDecl(unless(isInstantiated()),returns(qualType(unannotatedType)),hasBody(stmt())).bind("f")
+
+# match binaryOperation(hasOperatorName("="),hasLHS(declRefExpr(to(varDecl(hasType(classTemplateSpecializationDecl(hasName("CAutoRef"))))))),hasRHS(ignoringParenCasts(declRefExpr(to(varDecl(hasType(ownerDecl))))))).bind("op") # 5
+# match cxxConstructExpr(hasDeclaration(cxxConstructorDecl(ofClass(classTemplateSpecializationDecl(hasName("CAutoRef"))))),hasArgument(0, ignoringParenImpCasts(declRefExpr(to(varDecl())).bind("initializing AutoRef")))) # 0: surprise!
+# match cxxConstructExpr(hasDeclaration(cxxConstructorDecl(ofClass(classTemplateSpecializationDecl(hasName("CAutoRef"))))),hasArgument(0, ignoringParenImpCasts(expr(callExpr()).bind("initializing AutoRef")))) # 11 in gporca, 0 in gpopt
+# match cxxConstructExpr(hasDeclaration(cxxConstructorDecl(ofClass(classTemplateSpecializationDecl(hasName("CAutoRef"))))),hasArgument(0, ignoringParenImpCasts(expr(cxxNewExpr()).bind("initializing AutoRef")))) # 4 in gporca, 1 in gpopt
+# match cxxConstructExpr(hasDeclaration(cxxConstructorDecl(ofClass(classTemplateSpecializationDecl(hasName("CAutoRef"))))),hasArgument(0, ignoringParenImpCasts(expr(unless(anyOf(cxxNewExpr(),callExpr()))).bind("initializing AutoRef")))) # 0 in gporca, 0 in gpopt
+# match binaryOperation(hasOperatorName("="),hasLHS(declRefExpr(to(varDecl(hasType(classTemplateSpecializationDecl(hasName("CAutoRef"))))))),hasRHS(ignoringParenCasts(unless(declRefExpr(to(varDecl(hasType(ownerDecl)))))))).bind("assign")
+# match cxxMemberCallExpr(callee(cxxMethodDecl(hasName("Reset"))),thisPointerType(cxxRecordDecl(hasName("CAutoRef")))).bind("reset") # 0
+
+match fieldDecl(unless(isInstantiated()),hasType(qualType(ownerType,elaboratedType(namesType(templateSpecializationType(hasTemplateArgument(0, refersToType(pointsTo(recordDecl(decl().bind("class"),unless(isDefinition()),unless(hasAncestor(translationUnitDecl(hasDescendant(classTemplateSpecializationDecl(hasName("RefPtrInfo"),hasTemplateArgument(0,refersToType(hasDeclaration(equalsBoundNode("class"))))))))))))))))))).bind("field")
+# match fieldDecl(unless(isInstantiated()),hasType(qualType(ownerType,elaboratedType(namesType(templateSpecializationType(hasTemplateArgument(0, refersToType(pointsTo(recordDecl(namedDecl(hasAnyName("CExpression")).bind("class"),unless(isDefinition()),unless(hasAncestor(translationUnitDecl(hasDescendant(classTemplateSpecializationDecl(hasName("RefPtrInfo"),hasTemplateArgument(0,refersToType(hasDeclaration(equalsBoundNode("class"))))))))))))))))))).bind("field")
+# match functionDecl(returns(qualType(hasDeclaration(ownerDecl),pointsTo(cxxRecordDecl(unless(classTemplateSpecializationDecl()),unless(isDefinition()),decl().bind("class"),hasAncestor(translationUnitDecl(unless(hasDescendant(classTemplateSpecializationDecl(hasName("RefPtrInfo"),hasTemplateArgument(0,refersToType(hasDeclaration(equalsBoundNode("class")))))))))))))).bind("rt")
+# match functionDecl(returns(qualType(hasDeclaration(ownerDecl),pointsTo(cxxRecordDecl(unless(classTemplateSpecializationDecl()),unless(isDefinition()),namedDecl(hasAnyName("CLogicalGbAgg", "CDXLWindowFrame", "CConstraintInterval", "IMDPartConstraint")).bind("class"),hasAncestor(translationUnitDecl(unless(hasDescendant(classTemplateSpecializationDecl(hasName("RefPtrInfo"),hasTemplateArgument(0,refersToType(hasDeclaration(equalsBoundNode("class")))))))))))))).bind("rt")
+# match functionDecl(returns(qualType(hasDeclaration(ownerDecl),pointsTo(cxxRecordDecl(unless(classTemplateSpecializationDecl()),unless(isDefinition()),namedDecl(hasAnyName("CExpression")).bind("class"),hasAncestor(translationUnitDecl(unless(hasDescendant(classTemplateSpecializationDecl(hasName("RefPtrInfo"),hasTemplateArgument(0,refersToType(hasDeclaration(equalsBoundNode("class")))))))))))))).bind("rt")
+# match qualType(hasDeclaration(ownerDecl),pointsTo(cxxRecordDecl(unless(classTemplateSpecializationDecl()),decl().bind("class"),unless(isDefinition()),unless(hasAncestor(translationUnitDecl(hasDescendant(classTemplateSpecializationDecl(hasName("RefPtrInfo"),hasTemplateArgument(0,refersToType(hasDeclaration(equalsBoundNode("class")))))))))))).bind("type")
+# match qualType(hasDeclaration(ownerDecl),pointsTo(recordDecl(hasAnyName("CCTEReq", "CMDRequest", "CReqdPropRelational", "COptimizerConfig", "CColRefSet", "CDXLDirectDispatchInfo", "ICostModel", "CDXLNode", "IConstExprEvaluator", "CDistributionSpec", "CDXLOperator", "COrderSpec", "CRewindabilitySpec", "CColRefSet", "CEnfdOrder", "CEnfdRewindability", "CEnfdDistribution", "CDXLTableDescr", "CMDIdRelStats", "CMDIdCast", "CMDIdScCmp", "IDatumBool", "IDatumInt2", "IDatumInt4", "IDatumInt8", "IDatumOid", "CLogicalGbAgg", "CDXLWindowFrame", "CConstraintInterval", "IMDPartConstraint"),decl().bind("class"),unless(isDefinition()),unless(hasAncestor(translationUnitDecl(hasDescendant(classTemplateSpecializationDecl(hasName("RefPtrInfo"),hasTemplateArgument(0,refersToType(hasDeclaration(equalsBoundNode("class")))))))))))).bind("type")
+# match qualType(hasDeclaration(ownerDecl),pointsTo(recordDecl(hasAnyName("CExpression", "CDrvdPropPlan", "IDatum"),decl().bind("class"),unless(isDefinition()),unless(hasAncestor(translationUnitDecl(hasDescendant(classTemplateSpecializationDecl(hasName("RefPtrInfo"),hasTemplateArgument(0,refersToType(hasDeclaration(equalsBoundNode("class")))))))))))).bind("type")
+
+# match callExpr(unless(isExpansionInSystemHeader()),isExpansionInMainFile(),unless(callee(functionDecl()))).bind("call")
+# match cxxMethodDecl(forEachOverridden(cxxMethodDecl(returns(qualType(refCountPointerType,pointsTo(cxxRecordDecl().bind("base-rt")))))), returns(pointsTo(cxxRecordDecl(isDerivedFrom(equalsBoundNode("base-rt")))))).bind("covariant")
+
+# match callExpr(callee(functionDecl(hasAnyName("SafeRelease", "Release"))), expr().bind("release"), hasParent(ifStmt()))
+# match callExpr(callee(functionDecl(hasName("::gpopt::CUtils::AddRefAppend")))).bind("ara")
+# match cxxConstCastExpr(unless(isExpansionInSystemHeader()),hasSourceExpression(hasType(pointsTo(unless(isConstQualified()))))).bind("cc")
+
+# match recordDecl(has(fieldDecl(hasType(pointsTo(refCountPointerType))).bind("struct")))
+# match cxxDynamicCastExpr(hasSourceExpression(hasType(ownerDecl))).bind("cast")
+# match cxxMethodDecl(isDefinition(), hasName("Exfp"), ofClass(isDerivedFrom(cxxRecordDecl(hasName("CXformImplementation")))), unless(hasDescendant(callExpr(callee(functionDecl(hasName("DeriveHasSubquery"))))))).bind("Exfp")
+# match callExpr(callee(functionDecl(hasName("SafeRelease"))),hasArgument(0, callExpr(callee(functionDecl(hasName("Value")))))).bind("release-value")
+# match cxxMemberCallExpr(callee(functionDecl(hasName("Release"))),on(cxxOperatorCallExpr(hasOperatorName("->")))).bind("release-value")
+
+# match returnStmt(hasReturnValue(ignoringParenCasts(arraySubscriptExpr())),forFunction(functionDecl(unless(isInstantiated()),returns(unannotatedType)))).bind("return-subscript")
+# match cxxMemberCallExpr(on(cxxMemberCallExpr(callee(functionDecl(hasName("Reset"))))),callee(functionDecl(hasName("Release")))).bind("reset-release")
+# match cxxMemberCallExpr(callee(functionDecl(hasName("Reset"))),on(hasType(cxxRecordDecl(hasName("CAutoRef"))))).bind("reset")
+
+# returning an owner for an unannotated function
+# match returnStmt(hasReturnValue(hasType(ownerDecl)),forFunction(returns(unannotatedType))).bind("return")
+
+# passing owner to unannotated param
+# match invocation(unless(hasDeclaration(functionDecl(anyOf(isInstantiated(), hasAnyName("cast", "dyn_cast", "SafeRelease"), cxxConstructorDecl(ofClass(hasAnyName("CSyncHashtableAccessByKey"))))))),forEachArgumentWithParamType(hasType(ownerDecl), qualType(unannotatedType, unless(pointsTo(isConstQualified()))))).bind("call")
+
+# increase our chances of moving an owner param in a ctor initializer
+# match cxxConstructorDecl(forEachConstructorInitializer(cxxCtorInitializer(forField(hasType(ownerDecl)),withInitializer(ignoringParenCasts(declRefExpr(to(parmVarDecl(decl().bind("param"),hasDeclContext(functionDecl(hasBody(hasDescendant(declRefExpr(expr().bind("ref"),to(equalsBoundNode("param")))))))))))))))
